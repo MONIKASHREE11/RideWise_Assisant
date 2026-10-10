@@ -179,6 +179,25 @@ class AgentRoutingTests(unittest.TestCase):
             with self.subTest(instruction=instruction):
                 self.assertIn(instruction, system_prompt)
 
+    def test_prompt_requires_cancellation_policy_version_and_booking_date(self):
+        fake_llm = FakeLLM(assistant_answer("Done."))
+        respond(
+            "I cancelled B-0005, what refund should I get?",
+            role="Customer",
+            customer_id="CUST0010",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        system_prompt = fake_llm.calls[0][0][0]["content"]
+        self.assertIn(
+            "Whenever an answer relies on a cancellation or refund "
+            "calculation or policy chunk",
+            system_prompt,
+        )
+        self.assertIn("state which policy version (v1 or v2) applied", system_prompt)
+        self.assertIn("chosen by the booking date", system_prompt)
+
     def test_sql_error_is_retried_with_allowed_views_and_only_success_is_cited(self):
         fake_llm = FakeLLM(
             function_call(
