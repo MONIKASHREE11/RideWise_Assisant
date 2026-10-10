@@ -88,6 +88,41 @@ class PolicyRetrievalTests(unittest.TestCase):
         self.assertTrue(cancellation_hits)
         self.assertEqual({hit.version for hit in cancellation_hits}, {"2"})
 
+    def test_scanned_policy_page_tables_are_transcribed_as_chunks(self) -> None:
+        expected = (
+            (
+                "03_Cancellation_and_Refund_Policy_v2.pdf",
+                2,
+                "transcribed from scanned annexure",
+                ("48 hours or more | 100%", "12 hours or more, but less than 48 hours | 75%",
+                 "2 hours or more, but less than 12 hours | 25%", "Less than 2 hours"),
+            ),
+            (
+                "04_Late_Return_and_Damage_Penalty_Schedule.pdf",
+                3,
+                "transcribed from scanned annexure",
+                ("STANDARD | None", "SILVER | None", "GOLD | 30 minutes"),
+            ),
+            (
+                "05_EV_User_Guide_and_FAQ.pdf",
+                2,
+                "transcribed from scanned figure",
+                ("below 10%", "Exactly 10%", "20% and above"),
+            ),
+        )
+        for doc_name, page, note, fragments in expected:
+            with self.subTest(doc_name=doc_name):
+                matches = [
+                    chunk
+                    for chunk in self.chunks
+                    if chunk.doc_name == doc_name
+                    and chunk.page == page
+                    and chunk.transcription_note == note
+                ]
+                self.assertEqual(len(matches), 1)
+                for fragment in fragments:
+                    self.assertIn(fragment.casefold(), matches[0].text.casefold())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,13 @@ provide citation metadata via `.citation()` for later display in Sources.
 Extracted PDF text is untrusted reference data; it must not be treated as
 instructions by any future answering agent.
 
+Deterministic calculations are available in `src/calculators/`. Cancellation
+refunds select v1/v2 using the booking time in IST, use only successful booking
+payments as paid amounts, and account for completed refunds. Late-return,
+damage, GST, tier grace-period, and EV low-battery calculations return their
+inputs, formula, result, and policy citations. Policy constants and citations
+are centralized in `src/calculators/config.py`.
+
 The database helper is available in `src/db/safe_sql.py`; it opens SQLite in read-only mode,
 allows only one SELECT statement, applies an SQLite authorizer and timeout,
 and caps returned rows. Per-connection customer views scope profile data by

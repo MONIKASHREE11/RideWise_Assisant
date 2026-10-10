@@ -32,15 +32,65 @@ class PolicyChunk:
     page: int
     effective_date: str | None
     text: str
+    transcription_note: str | None = None
 
     def citation(self) -> dict[str, str | int | None]:
-        return {
+        citation = {
             "doc": self.doc_name,
             "version": self.version,
             "section": self.section_title,
             "page": self.page,
             "effective_date": self.effective_date,
         }
+        if self.transcription_note:
+            citation["transcription_note"] = self.transcription_note
+        return citation
+
+
+_SCANNED_PAGE_TRANSCRIPTS = {
+    (
+        "03_Cancellation_and_Refund_Policy_v2.pdf",
+        2,
+    ): (
+        "Annexure 1: Approved refund schedule (signed copy)",
+        "transcribed from scanned annexure",
+        "Applies to bookings made on or after 1 July 2026, 00:00 IST.\n"
+        "Cancellation before scheduled pickup | Refund of rental charge\n"
+        "48 hours or more | 100%\n"
+        "12 hours or more, but less than 48 hours | 75%\n"
+        "2 hours or more, but less than 12 hours | 25%\n"
+        "Less than 2 hours | No refund (0%)\n"
+        "Cancelled by RideWise: 100% refund in all cases.\n"
+        "No-show: no refund.",
+    ),
+    (
+        "04_Late_Return_and_Damage_Penalty_Schedule.pdf",
+        3,
+    ): (
+        "Annexure A: Tier benefits",
+        "transcribed from scanned annexure",
+        "Late return grace period by customer tier\n"
+        "Customer tier | Grace period on late return\n"
+        "STANDARD | None\n"
+        "SILVER | None\n"
+        "GOLD | 30 minutes (up to and including 30 min)\n"
+        "A GOLD return up to 30 minutes late: no late fee.\n"
+        "A GOLD return more than 30 minutes late: the full lateness "
+        "is charged from the first minute, as for other tiers.\n"
+        "Approved: RideWise Policy Committee, 15 December 2024.",
+    ),
+    (
+        "05_EV_User_Guide_and_FAQ.pdf",
+        2,
+    ): (
+        "Battery level at return (Figure 2)",
+        "transcribed from scanned figure",
+        "RED (below 10%): ₹150 low-battery charging fee applies.\n"
+        "AMBER (10%-19%): no fee, but please charge before your next trip.\n"
+        "GREEN (20% and above): ideal return level.\n"
+        "Exactly 10% is not below 10%, so no fee is charged.",
+    ),
+}
 
 
 def parse_effective_date(text: str) -> str | None:
@@ -216,11 +266,33 @@ def load_policy_chunks(
             f"Expected exactly five numbered policy PDFs in {directory}, "
             f"found {len(paths)}."
         )
-    return [
+    chunks = [
         chunk
         for path in paths
         for chunk in _extract_document(path, chunk_size)
     ]
+    for (doc_name, page), (
+        section_title,
+        transcription_note,
+        text,
+    ) in _SCANNED_PAGE_TRANSCRIPTS.items():
+        source_chunk = next(
+            chunk
+            for chunk in chunks
+            if chunk.doc_name == doc_name and chunk.page == page
+        )
+        chunks.append(
+            PolicyChunk(
+                doc_name=doc_name,
+                version=source_chunk.version,
+                section_title=section_title,
+                page=page,
+                effective_date=source_chunk.effective_date,
+                text=f"[{transcription_note}]\n{text}",
+                transcription_note=transcription_note,
+            )
+        )
+    return chunks
 
 
 def _effective_datetime(value: str) -> datetime:
