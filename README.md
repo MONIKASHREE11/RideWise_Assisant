@@ -6,16 +6,25 @@ deterministic Python calculators, and a NeoStats OpenAI-compatible endpoint.
 
 ## Setup and run
 
-1. Install Python 3.10 or newer, then install the project dependencies:
-   `python -m pip install -r requirements.txt`.
-2. Copy the provided `ridewise.db` into the project's `data/` directory. The
-   database is git-ignored and opened read-only by the app. Keep
-   `data_dictionary.md` and the five policy PDFs in `data/` as well.
-3. Copy `.env.example` to `.env` and fill in `NEOSTATS_BASE_URL`,
-   `NEOSTATS_API_KEY`, `NEOSTATS_MODEL` (the deployed model name), and
-   `NEOSTATS_EMBEDDING_MODEL`. Keep `.env` private; it is git-ignored.
-4. Start the application with `streamlit run app.py`.
-5. Run the tests with `python -m unittest discover -s tests`.
+1. Install Python 3.10 or newer.
+2. Create and activate a virtual environment:
+   `python -m venv .venv`, then on Windows run
+   `.venv\Scripts\activate`, or on Mac/Linux run
+   `source .venv/bin/activate`.
+3. Install the project dependencies:
+   `pip install -r requirements.txt`.
+4. Copy `ridewise.db`, the database provided in the hackathon pack, into the
+   project's `data/` directory. It is not included in this repository, is
+   git-ignored, and is opened read-only by the app. Keep `data_dictionary.md`
+   and the five policy PDFs in `data/` as well.
+5. Copy `.env.example` to `.env` and fill in `NEOSTATS_BASE_URL`,
+   `NEOSTATS_API_KEY`, and `NEOSTATS_MODEL` using the provided NeoStats
+   configuration. `NEOSTATS_MODEL` must be the deployment name given in the
+   provided wrapper, not the underlying model name. `NEOSTATS_EMBEDDING_MODEL`
+   is optional: leave it blank to use BM25 keyword search for policy retrieval.
+   Keep `.env` private; it is git-ignored.
+6. Start the application with `streamlit run app.py`.
+7. Run the tests with `python -m unittest discover -s tests`.
 
 ## Architecture
 
@@ -36,8 +45,9 @@ Sources panel.
 
 Policy ingestion in `src/policy/retrieval.py` chunks the five policy PDFs with
 document, version, section, page, and effective-date metadata. Retrieval uses
-BM25 by default; setting `NEOSTATS_EMBEDDING_MODEL` enables embeddings through
-the same NeoStats endpoint. Cancellation/refund retrieval requires the
+BM25 keyword search when the optional `NEOSTATS_EMBEDDING_MODEL` is blank;
+setting it enables embeddings through the same NeoStats endpoint.
+Cancellation/refund retrieval requires the
 booking's `booked_at` timestamp to select the applicable policy version.
 Extracted PDF text is untrusted reference data, never instructions.
 
