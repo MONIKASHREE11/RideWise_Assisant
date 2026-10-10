@@ -175,9 +175,49 @@ class AgentRoutingTests(unittest.TestCase):
             "state the true total",
             "only the first 10 rows are shown",
             "never describe a capped list as complete",
+            "minimum customer-identifying detail",
+            "Contact fields are masked and must remain masked",
         ):
             with self.subTest(instruction=instruction):
                 self.assertIn(instruction, system_prompt)
+
+    def test_customer_prompt_declines_operational_queries_without_support_rules(self):
+        fake_llm = FakeLLM(assistant_answer("Done."))
+        respond(
+            "Hello",
+            role="Customer",
+            customer_id="CUST0010",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        system_prompt = fake_llm.calls[0][0][0]["content"]
+        self.assertIn(
+            "answer only about the signed-in customer's own bookings, payments, "
+            "damage reports, and the policies",
+            system_prompt,
+        )
+        self.assertIn(
+            "That information is only available to support agents. I can help "
+            "with your own account.",
+            system_prompt,
+        )
+        self.assertIn("Always phrase results as 'in your account'", system_prompt)
+        self.assertIn("never say 'in total' or 'across all'", system_prompt)
+        self.assertIn(
+            "I can only access your own account.",
+            system_prompt,
+        )
+        self.assertNotIn("Count rows with COUNT(", system_prompt)
+        self.assertNotIn("COUNT(<id column>)", system_prompt)
+        for support_only_instruction in (
+            "Support queries are capped at 10 rows",
+            "COUNT(<id column>) query",
+            "minimum customer-identifying detail",
+            "Contact fields are masked and must remain masked",
+        ):
+            with self.subTest(instruction=support_only_instruction):
+                self.assertNotIn(support_only_instruction, system_prompt)
 
     def test_prompt_requires_cancellation_policy_version_and_booking_date(self):
         fake_llm = FakeLLM(assistant_answer("Done."))
