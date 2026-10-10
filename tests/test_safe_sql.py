@@ -96,15 +96,29 @@ class SafeSqlTests(unittest.TestCase):
             with self.subTest(sql=sql):
                 self.assertEqual(self.run_customer_query(sql).rows, expected)
 
-    def test_customer_cannot_read_other_customer_or_base_tables(self) -> None:
-        with self.assertRaises(sqlite3.DatabaseError):
-            self.run_customer_query(
-                "SELECT customer_id FROM my_profile "
-                "WHERE customer_id = 'CUST0002'"
-            )
+    def test_customer_cannot_read_base_tables_or_union_with_them(self) -> None:
         for table in ("customers", "bookings", "payments", "damage_reports"):
             with self.subTest(table=table), self.assertRaises(sqlite3.DatabaseError):
                 self.run_customer_query(f"SELECT * FROM {table}")
+        with self.assertRaises(sqlite3.DatabaseError):
+            self.run_customer_query("SELECT name FROM sqlite_master")
+        with self.assertRaises(sqlite3.DatabaseError):
+            self.run_customer_query(
+                "SELECT booking_id FROM my_bookings "
+                "UNION SELECT booking_id FROM bookings"
+            )
+
+    def test_customer_scoped_views_return_no_other_customers_rows(self) -> None:
+        profile = self.run_customer_query(
+            "SELECT customer_id FROM my_profile "
+            "WHERE customer_id = 'CUST0002'"
+        )
+        bookings = self.run_customer_query(
+            "SELECT * FROM my_bookings "
+            "WHERE customer_id <> 'CUST0001'"
+        )
+        self.assertEqual(profile.rows, [])
+        self.assertEqual(bookings.rows, [])
 
     def test_customer_cannot_use_union_or_subquery_to_escape_views(self) -> None:
         queries = (
@@ -125,7 +139,7 @@ class SafeSqlTests(unittest.TestCase):
 
     def test_customer_id_format_and_existence_are_validated(self) -> None:
         for invalid_id, message in (
-            ("c1", "format"),
+            ("c1", "must match CUST followed by four digits"),
             ("CUST9999", "not found"),
         ):
             with self.subTest(customer_id=invalid_id):
