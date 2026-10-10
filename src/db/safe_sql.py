@@ -334,3 +334,34 @@ def execute_select(
     truncated = len(fetched) > row_limit
     rows = [dict(zip(columns, row)) for row in fetched[:row_limit]]
     return QueryResult(sql=statement, rows=rows, truncated=truncated)
+
+
+def describe_allowed_views(
+    db_path: str | Path,
+    *,
+    role: str,
+    customer_id: str | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Return the actual column names of role-visible temporary views."""
+    normalized_role = role.strip().casefold()
+    if normalized_role == "customer":
+        view_names = CUSTOMER_TABLES
+    elif normalized_role == "support agent":
+        view_names = AGENT_TABLES
+    else:
+        raise ValueError("Role must be 'Customer' or 'Support Agent'.")
+
+    descriptions = {}
+    with readonly_connection(
+        db_path,
+        role=role,
+        customer_id=customer_id,
+    ) as connection:
+        for view_name in sorted(view_names):
+            cursor = connection.execute(
+                f'SELECT * FROM "{view_name}" LIMIT 0'
+            )
+            descriptions[view_name] = tuple(
+                column[0] for column in cursor.description or ()
+            )
+    return descriptions

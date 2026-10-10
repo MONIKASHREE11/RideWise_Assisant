@@ -17,6 +17,11 @@ NeoStats OpenAI-compatible endpoint.
 
 The agent uses bounded function calls (or JSON tool calls when function calling
 is rejected) for scoped SQL, policy retrieval, and deterministic calculations.
+Before each conversation it reads the actual role-visible temporary view
+columns and gives only those views to the model; base tables remain unavailable.
+Rejected SQL receives role-specific correction guidance and a bounded retry.
+Only successful SQL is included in Sources; failed statements are logged for
+diagnostics. Support-agent queries return at most 10 rows.
 Policy ingestion and retrieval helpers in `src/policy/retrieval.py` extract
 chunks from the five numbered policy
 PDFs with document/version/section/page/effective-date metadata. Retrieval

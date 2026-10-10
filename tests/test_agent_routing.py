@@ -1,8 +1,14 @@
+import copy
 import json
 import unittest
 from pathlib import Path
 
-from src.agent.agent import CUSTOMER_REFUSAL, respond
+from src.agent.agent import (
+    CUSTOMER_REFUSAL,
+    RETRIEVAL_FAILURE_REPLY,
+    respond,
+)
+from src.db.safe_sql import AGENT_TABLES, CUSTOMER_TABLES, describe_allowed_views
 
 
 DATABASE = Path(__file__).resolve().parents[1] / "data" / "ridewise.db"
@@ -14,7 +20,7 @@ class FakeLLM:
         self.calls = []
 
     def __call__(self, messages, **kwargs):
-        self.calls.append((messages, kwargs))
+        self.calls.append((copy.deepcopy(messages), copy.deepcopy(kwargs)))
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -113,6 +119,149 @@ class AgentRoutingTests(unittest.TestCase):
         self.assertEqual(result["answer"], "Your profile was retrieved.")
         self.assertEqual(len(result["sources"]["sql"]), 2)
         self.assertEqual(fake_llm.calls[1][1], {})
+
+    def test_schema_guidance_and_run_sql_tool_are_role_specific(self):
+        for role, customer_id, allowed_views, denied_views in (
+            ("Customer", "CUST0001", CUSTOMER_TABLES, AGENT_TABLES),
+            ("Support Agent", None, AGENT_TABLES, CUSTOMER_TABLES),
+        ):
+            with self.subTest(role=role):
+                fake_llm = FakeLLM(assistant_answer("Done."))
+                result = respond(
+                    "Hello",
+                    role=role,
+                    customer_id=customer_id,
+                    db_path=DATABASE,
+                    llm=fake_llm,
+                )
+                self.assertEqual(result["answer"], "Done.")
+                messages, kwargs = fake_llm.calls[0]
+                prompt = messages[0]["content"]
+                sql_tool = next(
+                    tool["function"]
+                    for tool in kwargs["tools"]
+                    if tool["function"]["name"] == "run_sql"
+                )
+                actual_views = describe_allowed_views(
+                    DATABASE, role=role, customer_id=customer_id
+                )
+                for view_name in allowed_views:
+                    self.assertIn(view_name, prompt)
+                    self.assertIn(view_name, sql_tool["description"])
+                    for column in actual_views[view_name]:
+                        self.assertIn(column, prompt)
+                        self.assertIn(column, sql_tool["description"])
+                for view_name in denied_views:
+                    self.assertNotIn(f"- {view_name}:", prompt)
+                    self.assertNotIn(f"- {view_name}:", sql_tool["description"])
+                self.assertIn("Base tables are never available", prompt)
+                self.assertIn("Base tables are never available", sql_tool["description"])
+
+    def test_sql_error_is_retried_with_allowed_views_and_only_success_is_cited(self):
+        fake_llm = FakeLLM(
+            function_call(
+                "run_sql",
+                {"sql": "SELECT COUNT(booking_id) AS count FROM bookings"},
+            ),
+            function_call(
+                "run_sql",
+                {
+                    "sql": "SELECT COUNT(booking_id) AS count FROM agent_bookings "
+                    "WHERE booking_status = 'CNL_U'"
+                },
+            ),
+            assistant_answer("There are 142 customer cancellations."),
+        )
+
+        result = respond(
+            "How many bookings were cancelled by customers?",
+            role="Support Agent",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        self.assertEqual(result["answer"], "There are 142 customer cancellations.")
+        self.assertEqual(
+            result["sources"]["sql"],
+            [
+                "SELECT COUNT(booking_id) AS count FROM agent_bookings "
+                "WHERE booking_status = 'CNL_U'"
+            ],
+        )
+        retry_feedback = json.loads(fake_llm.calls[1][0][-1]["content"])
+        self.assertIn("agent_bookings", retry_feedback["error"])
+        self.assertIn("Base tables are never available", retry_feedback["error"])
+        rows = json.loads(fake_llm.calls[2][0][-1]["content"])["rows"]
+        self.assertEqual(rows, [{"count": 142}])
+
+    def test_final_no_record_answer_after_failed_sql_becomes_retrieval_fallback(self):
+        fake_llm = FakeLLM(
+            function_call(
+                "run_sql",
+                {"sql": "SELECT payment_id FROM payments WHERE payment_id='PAY00071'"},
+            ),
+            assistant_answer("No record found for that payment."),
+        )
+
+        result = respond(
+            "Show the remark for PAY00071",
+            role="Support Agent",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        self.assertEqual(result["answer"], RETRIEVAL_FAILURE_REPLY)
+        self.assertNotIn("no record", result["answer"].casefold())
+        self.assertEqual(result["sources"]["sql"], [])
+
+    def test_json_tool_fallback_retries_failed_sql_before_final_answer(self):
+        unsupported = RuntimeError("tool calling is unsupported")
+        unsupported.status_code = 400
+        fake_llm = FakeLLM(
+            unsupported,
+            assistant_answer(
+                json.dumps(
+                    {
+                        "tool": "run_sql",
+                        "arguments": {
+                            "sql": "SELECT COUNT(booking_id) FROM bookings"
+                        },
+                    }
+                )
+            ),
+            assistant_answer(
+                json.dumps(
+                    {
+                        "tool": "run_sql",
+                        "arguments": {
+                            "sql": "SELECT COUNT(booking_id) AS count "
+                            "FROM agent_bookings WHERE booking_status = 'CNL_U'"
+                        },
+                    }
+                )
+            ),
+            assistant_answer(
+                json.dumps({"answer": "There are 142 customer cancellations."})
+            ),
+        )
+
+        result = respond(
+            "How many bookings were cancelled by customers?",
+            role="Support Agent",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        self.assertEqual(result["answer"], "There are 142 customer cancellations.")
+        self.assertEqual(
+            result["sources"]["sql"],
+            [
+                "SELECT COUNT(booking_id) AS count "
+                "FROM agent_bookings WHERE booking_status = 'CNL_U'"
+            ],
+        )
+        retry_feedback = json.loads(fake_llm.calls[2][0][-1]["content"])
+        self.assertIn("agent_bookings", retry_feedback["tool_result"]["error"])
 
 
 if __name__ == "__main__":
