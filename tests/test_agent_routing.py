@@ -157,6 +157,28 @@ class AgentRoutingTests(unittest.TestCase):
                 self.assertIn("Base tables are never available", prompt)
                 self.assertIn("Base tables are never available", sql_tool["description"])
 
+    def test_support_prompt_requires_count_and_truthful_capped_list(self):
+        fake_llm = FakeLLM(assistant_answer("Done."))
+        respond(
+            "Which payments are pending?",
+            role="Support Agent",
+            db_path=DATABASE,
+            llm=fake_llm,
+        )
+
+        system_prompt = fake_llm.calls[0][0][0]["content"]
+        for instruction in (
+            "When a support query could return more than 10 rows",
+            "COUNT(<id column>) query",
+            "same permitted view with the same filter",
+            "never use COUNT(*)",
+            "state the true total",
+            "only the first 10 rows are shown",
+            "never describe a capped list as complete",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertIn(instruction, system_prompt)
+
     def test_sql_error_is_retried_with_allowed_views_and_only_success_is_cited(self):
         fake_llm = FakeLLM(
             function_call(
