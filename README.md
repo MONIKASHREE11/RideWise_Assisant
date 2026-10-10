@@ -27,6 +27,10 @@ provide citation metadata via `.citation()` for later display in Sources.
 Extracted PDF text is untrusted reference data; it must not be treated as
 instructions by any future answering agent.
 
+Database exceptions are logged for diagnostics but translated by the UI
+boundary into a short, plain-language reply; raw SQLite error text is not
+shown to users.
+
 Deterministic calculations are available in `src/calculators/`. Cancellation
 refunds select v1/v2 using the booking time in IST, use only successful booking
 payments as paid amounts, and account for completed refunds. Late-return,

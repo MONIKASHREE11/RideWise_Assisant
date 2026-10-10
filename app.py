@@ -2,7 +2,7 @@ import uuid
 
 import streamlit as st
 
-from src.agent.agent import respond
+from src.agent.agent import respond_safely
 
 
 def _reset_conversation() -> None:
@@ -59,7 +59,7 @@ if prompt:
     else:
         st.session_state["messages"].append({"role": "user", "content": prompt})
         history = st.session_state["messages"][:-1]
-        result = respond(prompt, history=history)
+        result = respond_safely(prompt, history=history)
         st.session_state["messages"].append(
             {
                 "role": "assistant",
