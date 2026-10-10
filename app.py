@@ -44,11 +44,33 @@ for message in st.session_state["messages"]:
                 sql = sources.get("sql")
                 policy_chunks = sources.get("policy_chunks", [])
                 if sql:
-                    st.code(sql, language="sql")
+                    for statement in sql:
+                        st.code(statement, language="sql")
                 else:
                     st.caption("No SQL was run.")
                 if policy_chunks:
-                    st.write(policy_chunks)
+                    for chunk in policy_chunks:
+                        citation = chunk.get("metadata", {})
+                        title = " · ".join(
+                            str(value)
+                            for value in (
+                                citation.get("doc"),
+                                citation.get("version"),
+                                citation.get("section"),
+                                f"p. {citation.get('page')}"
+                                if citation.get("page") is not None
+                                else None,
+                            )
+                            if value
+                        )
+                        with st.expander(title or "Policy source"):
+                            st.caption(
+                                f"Effective date: "
+                                f"{citation.get('effective_date') or 'Not stated'}"
+                            )
+                            if citation.get("transcription_note"):
+                                st.caption(citation["transcription_note"])
+                            st.write(chunk.get("text", ""))
                 else:
                     st.caption("No policy chunks were cited.")
 
@@ -59,7 +81,12 @@ if prompt:
     else:
         st.session_state["messages"].append({"role": "user", "content": prompt})
         history = st.session_state["messages"][:-1]
-        result = respond_safely(prompt, history=history)
+        result = respond_safely(
+            prompt,
+            history=history,
+            role=role,
+            customer_id=customer_id,
+        )
         st.session_state["messages"].append(
             {
                 "role": "assistant",

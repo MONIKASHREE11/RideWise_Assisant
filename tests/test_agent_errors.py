@@ -17,14 +17,16 @@ class AgentDatabaseErrorTests(unittest.TestCase):
 
         self.assertEqual(result["answer"], DATABASE_ERROR_REPLY)
         self.assertNotIn(raw_error, result["answer"])
-        self.assertEqual(result["sources"], {"sql": None, "policy_chunks": []})
+        self.assertEqual(result["sources"], {"sql": [], "policy_chunks": []})
 
     @patch("src.agent.agent.respond")
-    def test_non_database_errors_are_not_silently_hidden(self, mock_respond) -> None:
-        mock_respond.side_effect = ValueError("invalid agent state")
+    def test_model_errors_return_friendly_fallback(self, mock_respond) -> None:
+        mock_respond.side_effect = TimeoutError("provider timeout secret")
 
-        with self.assertRaisesRegex(ValueError, "invalid agent state"):
-            respond_safely("Show my booking")
+        result = respond_safely("Show my booking")
+
+        self.assertIn("temporarily unavailable", result["answer"])
+        self.assertNotIn("provider timeout", result["answer"])
 
 
 if __name__ == "__main__":

@@ -105,9 +105,21 @@ def _validate_customer(connection: sqlite3.Connection, customer_id: str) -> None
         raise ValueError("Customer ID was not found.")
 
 
+def _columns(connection: sqlite3.Connection, table: str) -> frozenset[str]:
+    return frozenset(
+        row[1]
+        for row in connection.execute(
+            f"PRAGMA table_info({_quote_identifier(table)})"
+        )
+    )
+
+
 def _install_customer_views(
     connection: sqlite3.Connection, customer_id: str
 ) -> None:
+    vehicle_columns = _columns(connection, "vehicles")
+    hourly_rate = "v.hourly_rate" if "hourly_rate" in vehicle_columns else "NULL"
+    daily_rate = "v.daily_rate" if "daily_rate" in vehicle_columns else "NULL"
     connection.execute(
         f"""
         CREATE TEMP VIEW my_profile AS
@@ -120,9 +132,12 @@ def _install_customer_views(
     connection.execute(
         f"""
         CREATE TEMP VIEW my_bookings AS
-        SELECT b.*, v.vehicle_type, v.model AS vehicle_model, v.hub_name
+        SELECT b.*, v.vehicle_type, v.model AS vehicle_model, v.hub_name,
+               {hourly_rate} AS hourly_rate, {daily_rate} AS daily_rate,
+               c.customer_tier
         FROM bookings AS b
         JOIN vehicles AS v ON v.vehicle_id = b.vehicle_id
+        JOIN customers AS c ON c.customer_id = b.customer_id
         WHERE b.customer_id = '{customer_id}'
         """
     )

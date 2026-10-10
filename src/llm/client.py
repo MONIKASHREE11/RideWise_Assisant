@@ -47,10 +47,17 @@ def chat_completion(
     messages: Iterable[dict[str, Any]],
     *,
     temperature: float = 0.0,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> Any:
     """Request one chat completion using the configured NeoStats deployment."""
-    return create_client().chat.completions.create(
-        model=get_model(),
-        messages=list(messages),
-        temperature=temperature,
-    )
+    parameters: dict[str, Any] = {
+        "model": get_model(),
+        "messages": list(messages),
+        "temperature": temperature,
+    }
+    if tools is not None:
+        parameters["tools"] = tools
+    if tool_choice is not None:
+        parameters["tool_choice"] = tool_choice
+    return create_client().chat.completions.create(**parameters)
