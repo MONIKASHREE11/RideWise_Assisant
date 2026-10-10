@@ -1,61 +1,72 @@
 # RideWise Assist
 
-Conversational assistant for bike and EV rental customer support, using a
-Streamlit chat UI, a read-only SQLite database, policy PDF retrieval, and a
-NeoStats OpenAI-compatible endpoint.
+Conversational assistant for bike and EV rental customer support. It uses
+Streamlit, a read-only SQLite database, versioned policy-PDF retrieval,
+deterministic Python calculators, and a NeoStats OpenAI-compatible endpoint.
 
-## Run locally
+## Setup and run
 
-1. Use Python 3.10 or newer.
-2. Install dependencies: `python -m pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and set the NeoStats base URL, API key, and
-   model. Keep `.env` private; credentials are read from environment variables
-   through `python-dotenv`.
-4. Keep the supplied database and dictionary in `data/` (the database is
-   opened read-only).
-5. Start the UI with `streamlit run app.py`.
+1. Install Python 3.10 or newer, then install the project dependencies:
+   `python -m pip install -r requirements.txt`.
+2. Copy the provided `ridewise.db` into the project's `data/` directory. The
+   database is git-ignored and opened read-only by the app. Keep
+   `data_dictionary.md` and the five policy PDFs in `data/` as well.
+3. Copy `.env.example` to `.env` and fill in `NEOSTATS_BASE_URL`,
+   `NEOSTATS_API_KEY`, `NEOSTATS_MODEL` (the deployed model name), and
+   `NEOSTATS_EMBEDDING_MODEL`. Keep `.env` private; it is git-ignored.
+4. Start the application with `streamlit run app.py`.
+5. Run the tests with `python -m unittest discover -s tests`.
 
-The agent uses bounded function calls (or JSON tool calls when function calling
-is rejected) for scoped SQL, policy retrieval, and deterministic calculations.
-Before each conversation it reads the actual role-visible temporary view
-columns and gives only those views to the model; base tables remain unavailable.
-Rejected SQL receives role-specific correction guidance and a bounded retry.
-Only successful SQL is included in Sources; failed statements are logged for
-diagnostics. Support-agent queries return at most 10 rows.
-Policy ingestion and retrieval helpers in `src/policy/retrieval.py` extract
-chunks from the five numbered policy
-PDFs with document/version/section/page/effective-date metadata. Retrieval
-uses BM25 by default. Setting `NEOSTATS_EMBEDDING_MODEL` enables embeddings
-through the same NeoStats-compatible endpoint and credentials. Cancellation
-or refund retrieval requires the booking creation date so it can select the
-applicable cancellation-policy version. Retrieved `PolicyChunk` objects
-provide citation metadata via `.citation()` for later display in Sources.
-Extracted PDF text is untrusted reference data and is never treated as
-instructions.
+## Architecture
 
-Database, model, and tool exceptions are logged for diagnostics but translated
-by the UI boundary into short, plain-language replies; raw SQL, SQLite, or
-Python error text is not shown to users.
+```text
+User -> Streamlit UI -> Agent (tool loop with NeoStats LLM)
+                        |- run_sql -> safe read-only DB layer (role-scoped views)
+                        |- search_policy -> PDF chunks (versioned, cited)
+                        |- calculators -> refunds, late fees, GST (cited)
+```
 
-Deterministic calculations are available in `src/calculators/`. Cancellation
-refunds select v1/v2 using the booking time in IST, use only successful booking
-payments as paid amounts, and account for completed refunds. Late-return,
-damage, GST, tier grace-period, and EV low-battery calculations return their
-inputs, formula, result, and policy citations. Policy constants and citations
-are centralized in `src/calculators/config.py`.
+The agent gives the model only the columns of the temporary views available to
+the current role; a read-only SQLite authorizer, one-`SELECT` validation, and
+scoped views enforce access independently of the prompt. Policy and calculation
+citations, and only successful SQL statements, are shown in the expandable
+Sources panel.
 
-The database helper is available in `src/db/safe_sql.py`; it opens SQLite in read-only mode,
-allows only one SELECT statement, applies an SQLite authorizer and timeout,
-and caps returned rows. Per-connection customer views scope profile data by
-customer ID and scope bookings, payments, and damage reports through the
-booking relationship. Customer payment and damage views expose only structured
-fields; they omit free-text remarks and descriptions. Support sessions use
-temporary views; free-text fields have phone numbers, email addresses, and
-customer-name tokens redacted before exposure. Those fields remain untrusted
-data, never instructions: the answering agent must not follow or quote personal
-information from them. The sample wrapper
-in `data/` is excluded from Git because it contains an embedded credential;
-the application client instead reads `NEOSTATS_BASE_URL`, `NEOSTATS_API_KEY`,
-and `NEOSTATS_MODEL` from the environment or `.env`.
+## Data, policies, and calculations
 
-Run the tests with `python -m unittest discover -s tests`.
+Policy ingestion in `src/policy/retrieval.py` chunks the five policy PDFs with
+document, version, section, page, and effective-date metadata. Retrieval uses
+BM25 by default; setting `NEOSTATS_EMBEDDING_MODEL` enables embeddings through
+the same NeoStats endpoint. Cancellation/refund retrieval requires the
+booking's `booked_at` timestamp to select the applicable policy version.
+Extracted PDF text is untrusted reference data, never instructions.
+
+Calculators in `src/calculators/` compute rental charges, cancellation refunds,
+late-return penalties, damage charges, GST, tier benefits, and EV battery
+charges. They return inputs, formulas, results, and policy citations; the LLM
+does not perform arithmetic. Policy constants and citations are centralized
+in `src/calculators/config.py`.
+
+## Data access and privacy
+
+The database layer in `src/db/safe_sql.py` opens SQLite in read-only mode,
+validates a single `SELECT`, applies an authorizer and timeout, and caps rows.
+Customer temporary views scope profile data to the session customer and scope
+bookings, payments, and damage reports through their booking relationship.
+Customer payment/damage views omit free text. Support sessions use temporary
+operational views; contact fields are masked and names, phone numbers, and
+email addresses in remarks/descriptions are redacted where recognized. Database
+text and policy text are untrusted data, never instructions.
+
+The agent uses bounded function calling, with a JSON tool-call fallback if the
+endpoint rejects function calling. Role-specific schema guidance and retries
+help correct denied SQL; failed statements are logged for diagnostics, not
+shown in Sources. Tool, database, and model failures receive plain-language
+fallback replies rather than raw errors.
+
+## Configuration
+
+The application reads `NEOSTATS_BASE_URL`, `NEOSTATS_API_KEY`,
+`NEOSTATS_MODEL`, and optional embedding configuration from environment
+variables or `.env` through `python-dotenv`. Never commit `.env` or put
+credentials in source code.
