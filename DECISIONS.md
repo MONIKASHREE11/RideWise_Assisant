@@ -20,6 +20,16 @@
    extracted as text were transcribed by hand and explicitly flagged as
    transcriptions in their policy-chunk metadata.
 
+### Role-specific prompt guidance
+
+Customer prompts direct the model to answer only about the signed-in
+customer's account, decline operational questions, and phrase results as "in
+your account". Support prompts retain the 10-row cap, same-filter count, and
+minimum-identification/masking guidance. These instructions shape answers, but
+privacy is enforced by the database layer: read-only connections,
+role-scoped views, and the SQLite authorizer. Prompt wording is not the
+access-control boundary.
+
 ## 2) Alternatives rejected
 
 - Unrestricted SQL written by the LLM: it could reach data outside a
@@ -41,11 +51,18 @@
 - Name redaction relies on names already present in the customer database;
   unknown names in free text may not be caught.
 - Support-agent SQL results are capped at 10 rows per query.
+- Support-list totals and customer wording such as "in your account" are
+  model-followed instructions, not enforced output behavior.
+- The customer ID is a session input, not authentication or proof of identity.
+- If embedding retrieval is configured but the embedding service fails, there
+  is no automatic fallback to BM25.
+- The EV User Guide has no effective date parsed by the current loader.
+- Three scanned policy sections are hand-transcribed; transcription accuracy
+  requires manual verification.
+- `requirements.txt` does not pin dependency versions.
 - Completeness checks have not been run for late returns with no penalty row
   or `CNL_S` bookings with no refund row.
 - There are 35 penalty rows not reconciled against damage claims.
-- The app has no login; the customer ID entered in the session is not proof of
-  identity.
 - The database authorizer rejects `COUNT(*)` on views, so the agent is told to
   count with `COUNT(<id column>)` instead.
 - Live testing against the NeoStats model covered a small set of questions
@@ -58,7 +75,7 @@ Calculated late fees matched **435 of 435** rows, and battery fees matched
 **47 of 47** rows. Refund calculations matched **104 of 107** rows; the three
 remaining differences were **₹0.01** rounding differences.
 
-The project has 45 automated tests covering SQL safety, calculators, policy
+The project has 48 automated tests covering SQL safety, calculators, policy
 retrieval, agent routing, and error handling.
 
 ## 4) Next week

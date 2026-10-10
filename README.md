@@ -28,6 +28,11 @@ calculators and a NeoStats-hosted OpenAI-compatible model.
   statements and cited policy chunks.
 - Conversation history is kept in Streamlit session state. Changing roles or
   choosing **New conversation** clears the current conversation.
+- Prompt guidance is role-specific: customers are directed to keep answers
+  within their own account and decline operational questions; support agents
+  receive list-cap, count and data-minimization instructions. These instructions
+  shape wording only; privacy is enforced by read-only, role-scoped database
+  access and the SQLite authorizer.
 
 ## Project layout
 
@@ -76,10 +81,12 @@ The application queries the five tables in `ridewise.db`:
 | `payments` | `payment_id` | Booking, deposit, penalty and refund transactions |
 | `damage_reports` | `report_id` | Damage assessment, cost and claim status |
 
-The full column definitions and status codes are in `data/data_dictionary.md`.
-The app requires the database, dictionary and five numbered PDFs under `data/`.
-The database is supplied in the hackathon pack and is excluded from Git by
-`.gitignore`; if it is not present locally, copy it into `data/`.
+The full column definitions and status codes are in
+`data/data_dictionary.md`. The app needs the database and five numbered PDFs
+under `data/`; the dictionary is provided as reference documentation and is not
+currently read by the request path. The database is supplied in the hackathon
+pack and is excluded from Git by `.gitignore`; if it is not present locally,
+copy it into `data/`.
 
 Policy documents used by the retriever:
 
@@ -147,6 +154,10 @@ database.
   and `my_damage_reports`. Payments and damage reports are scoped through
   bookings for the session customer. Customer payment and damage views omit
   free-text remarks and descriptions.
+- Customer prompts direct the model to answer only about that customer's
+  account and policies, phrase results as "in your account", and decline
+  other-customer or fleet-wide/operational requests. The wording is
+  model-followed; the database layer is what enforces data access.
 - Support sessions can query `agent_customers`, `agent_vehicles`,
   `agent_bookings`, `agent_payments` and `agent_damage_reports`. The support
   customer view omits driving-license numbers and masks phone and email fields.
@@ -157,9 +168,10 @@ database.
   reads and functions, while a progress handler enforces a query timeout.
 - Queries return at most 25 rows for customers and 10 for support agents.
   Support-list totals are requested through a separate `COUNT(id)` query with
-  the same filter; the model is instructed to say when only the first 10 rows
-  are shown. The cap is enforced by code, but count and final wording still
-  depend on the model following that guidance.
+  the same filter; support prompts also request the total and say that only
+  the first 10 rows are shown. The cap is enforced by code, but execution of
+  the count query and final wording still depend on the model following that
+  guidance.
 
 These checks limit database access even if the model generates an invalid or
 overbroad query. Prompt instructions reinforce the rules; they are not the
@@ -244,7 +256,8 @@ version-pinned.
 
 ## Tests
 
-The `tests/` suite covers:
+The `tests/` suite currently has 48 test methods (verified with
+`python -m unittest discover -s tests`) and covers:
 
 - `test_safe_sql.py` — view scoping, blocked base/schema access, SQL validation,
   PII masking, read-only connections and row limits.
@@ -274,5 +287,8 @@ support lists and state the cancellation policy version and booking-date rule.
   date is not parsed.
 - If embeddings are configured but the embedding service fails, retrieval does
   not automatically fall back to BM25.
+- Three scanned policy sections are included as manually transcribed chunks,
+  so their accuracy depends on manual transcription and review.
+- `requirements.txt` lists dependencies without pinning their versions.
 - Operational completeness and reconciliation gaps documented in
   `DECISIONS.md` still need follow-up.
