@@ -28,6 +28,10 @@ SOURCE_TABLES = frozenset(
 DEFAULT_ROW_LIMIT = 25
 MAX_ROW_LIMIT = 100
 DEFAULT_TIMEOUT_SECONDS = 2.0
+_EMAIL_PATTERN = re.compile(
+    r"(?i)(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w-])"
+)
+_PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?91[\s().-]?)?[6-9](?:[\s().-]?\d){9}(?!\d)")
 _SAFE_FUNCTIONS = frozenset(
     {
         "abs",
@@ -45,6 +49,7 @@ _SAFE_FUNCTIONS = frozenset(
         "min",
         "nullif",
         "round",
+        "sanitize_untrusted_text",
         "strftime",
         "substr",
         "sum",
@@ -124,7 +129,8 @@ def _install_customer_views(
     connection.execute(
         f"""
         CREATE TEMP VIEW my_payments AS
-        SELECT p.*
+        SELECT p.payment_id, p.booking_id, p.payment_type, p.amount,
+               p.gst_amount, p.payment_method, p.payment_status, p.paid_at
         FROM payments AS p
         JOIN bookings AS b ON b.booking_id = p.booking_id
         WHERE b.customer_id = '{customer_id}'
@@ -133,7 +139,9 @@ def _install_customer_views(
     connection.execute(
         f"""
         CREATE TEMP VIEW my_damage_reports AS
-        SELECT d.*
+        SELECT d.report_id, d.booking_id, d.vehicle_id, d.reported_by,
+               d.damage_category, d.severity, d.assessed_cost,
+               d.claim_status, d.reported_at
         FROM damage_reports AS d
         JOIN bookings AS b ON b.booking_id = d.booking_id
         WHERE b.customer_id = '{customer_id}'
@@ -141,7 +149,52 @@ def _install_customer_views(
     )
 
 
+def _mask_untrusted_text(value: str | None, customer_names: tuple[str, ...]) -> str | None:
+    if value is None:
+        return None
+
+    redactions: list[str] = []
+
+    def preserve_redaction(match: re.Match[str], label: str) -> str:
+        redactions.append(f"[{label} redacted]")
+        return f"__RIDEWISE_REDACTION_{len(redactions) - 1}__"
+
+    sanitized = _EMAIL_PATTERN.sub(
+        lambda match: preserve_redaction(match, "email"), value
+    )
+    sanitized = _PHONE_PATTERN.sub(
+        lambda match: preserve_redaction(match, "phone"), sanitized
+    )
+    name_tokens = {
+        token
+        for name in customer_names
+        for token in re.findall(r"[^\W_]+", name, flags=re.UNICODE)
+    }
+    for token in sorted(name_tokens, key=len, reverse=True):
+        sanitized = re.sub(
+            rf"(?i)(?<!\w){re.escape(token)}(?!\w)",
+            "[name redacted]",
+            sanitized,
+        )
+    for index, redaction in enumerate(redactions):
+        sanitized = sanitized.replace(f"__RIDEWISE_REDACTION_{index}__", redaction)
+    return sanitized
+
+
 def _install_agent_views(connection: sqlite3.Connection) -> None:
+    customer_names = tuple(
+        row[0]
+        for row in connection.execute(
+            "SELECT full_name FROM customers WHERE full_name IS NOT NULL"
+        ).fetchall()
+        if row[0].strip()
+    )
+    connection.create_function(
+        "sanitize_untrusted_text",
+        1,
+        lambda value: _mask_untrusted_text(value, customer_names),
+        deterministic=True,
+    )
     connection.executescript(
         """
         CREATE TEMP VIEW agent_customers AS
@@ -157,8 +210,16 @@ def _install_agent_views(connection: sqlite3.Connection) -> None:
         FROM customers;
         CREATE TEMP VIEW agent_vehicles AS SELECT * FROM vehicles;
         CREATE TEMP VIEW agent_bookings AS SELECT * FROM bookings;
-        CREATE TEMP VIEW agent_payments AS SELECT * FROM payments;
-        CREATE TEMP VIEW agent_damage_reports AS SELECT * FROM damage_reports;
+        CREATE TEMP VIEW agent_payments AS
+        SELECT payment_id, booking_id, payment_type, amount, gst_amount,
+               payment_method, payment_status, transaction_ref, paid_at,
+               sanitize_untrusted_text(remarks) AS remarks
+        FROM payments;
+        CREATE TEMP VIEW agent_damage_reports AS
+        SELECT report_id, booking_id, vehicle_id, reported_by, damage_category,
+               severity, sanitize_untrusted_text(description) AS description,
+               assessed_cost, claim_status, reported_at
+        FROM damage_reports;
         """
     )
 
